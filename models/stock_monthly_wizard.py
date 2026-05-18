@@ -89,7 +89,7 @@ class StockMonthlyWizard(models.TransientModel):
     )
 
     # ===== Output =====
-    include_pdf = fields.Boolean(string="Include PDF", default=True)
+    include_pdf = fields.Boolean(string="Include PDF", default=False)
     include_excel = fields.Boolean(string="Include Excel", default=True)
 
     # ===== Email (Optional) =====
@@ -221,6 +221,10 @@ class StockMonthlyWizard(models.TransientModel):
                 raise UserError(_("Missing PDF report action: stock_monthly_report.action_stock_monthly_report_pdf"))
 
             pdf_content, _report_type = pdf_action._render_qweb_pdf(quants.ids, data=report_data)
+            if not (pdf_content or b""):
+                raise UserError(_("PDF generation returned empty content."))
+            if not pdf_content.startswith(b"%PDF"):
+                raise UserError(_("PDF generation failed (non-PDF content). Please verify wkhtmltopdf and report.url/web.base.url settings."))
             pdf_att = self.env["ir.attachment"].create({
                 "name": "Stock_On_Hand.pdf",
                 "type": "binary",
@@ -248,6 +252,10 @@ class StockMonthlyWizard(models.TransientModel):
                 raise UserError(_("Missing XLSX report action: stock_monthly_report.action_stock_monthly_report_xlsx"))
 
             xlsx_content, _report_type = xlsx_action._render_xlsx(quants.ids, data=report_data)
+            if not (xlsx_content or b""):
+                raise UserError(_("XLSX generation returned empty content."))
+            if not xlsx_content.startswith(b"PK"):
+                raise UserError(_("XLSX generation failed (non-XLSX content)."))
             xlsx_att = self.env["ir.attachment"].create({
                 "name": "Stock_On_Hand.xlsx",
                 "type": "binary",

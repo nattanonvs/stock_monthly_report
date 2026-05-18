@@ -13,7 +13,6 @@
                         <field name="month_end"/>
                     </group>
                     <group>
-                        <field name="include_pdf"/>
                         <field name="include_excel"/>
                         <field name="summary_only"/>
                         <field name="show_movements" attrs="{'invisible':[('summary_only','=',True)]}"/>
