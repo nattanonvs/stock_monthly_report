@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- PDF Action -->
+    <record id="action_stock_monthly_report_pdf" model="ir.actions.report">
+        <field name="name">Stock On Hand (PDF)</field>
+        <field name="model">stock.quant</field>
+        <field name="report_type">qweb-pdf</field>
+        <field name="report_name">stock_monthly_report.report_stock_monthly_pdf</field>
+        <field name="report_file">stock_monthly_report.report_stock_monthly_pdf</field>
+        <field name="print_report_name">'Stock_On_Hand'</field>
+        <field name="binding_type">report</field>
+    </record>
+
+    <!-- QWeb -->
+    <template id="report_stock_monthly_pdf" t-name="stock_monthly_report.report_stock_monthly_pdf">
+        <t t-call="web.html_container">
+            <t t-call="web.external_layout">
+                <div class="page">
+
+                    <!-- ===== Title ===== -->
+                    <h2>Stock On Hand Report</h2>
+
+                    <!-- ===== Header Info ===== -->
+                    <div class="row mb-2">
+                        <div class="col-6">
+                            <div><strong>Period:</strong> <t t-esc="header.get('period')"/></div>
+                            <div><strong>From:</strong> <t t-esc="header.get('date_from')"/></div>
+                            <div><strong>To:</strong> <t t-esc="header.get('date_to')"/></div>
+                        </div>
+                        <div class="col-6">
+                            <div><strong>Location (incl. sub):</strong> <t t-esc="header.get('location')"/></div>
+                            <t t-if="header.get('category')">
+                                <div><strong>Category:</strong> <t t-esc="header.get('category')"/></div>
+                            </t>
+                            <t t-if="header.get('products')">
+                                <div><strong>Products:</strong> <t t-esc="header.get('products')"/></div>
+                            </t>
+                        </div>
+                    </div>
+
+                    <t t-set="col_count" t-value="5 + (3 if show_movements else 0)"/>
+
+                    <table class="table table-sm o_main_table">
+                        <thead>
+                            <tr>
+                                <th style="width:28%;">Product</th>
+                                <th class="text-end" style="width:10%;">On Hand</th>
+                                <th style="width:8%;">UoM</th>
+                                <th class="text-end" style="width:12%;">FIFO Unit Cost</th>
+                                <th class="text-end" style="width:12%;">Value</th>
+                                <t t-if="show_movements">
+                                    <th class="text-end" style="width:10%;">Vendor In</th>
+                                    <th class="text-end" style="width:10%;">Customer Out</th>
+                                    <th class="text-end" style="width:10%;">Internal</th>
+                                </t>
+                            </tr>
+                        </thead>
+                        <tbody>
+
+                            <t t-set="grand_qty" t-value="0.0"/>
+                            <t t-set="grand_val" t-value="0.0"/>
+
+                            <!-- ===== Location loop ===== -->
+                            <t t-foreach="nested.items()" t-as="loc_item">
+                                <t t-set="loc_name" t-value="loc_item[0]"/>
+                                <t t-set="cat_map" t-value="loc_item[1]"/>
+
+                                <tr style="background:#e9ecef; font-weight:bold;">
+                                    <td t-att-colspan="col_count">Location: <t t-esc="loc_name"/></td>
+                                </tr>
+
+                                <t t-set="loc_qty" t-value="0.0"/>
+                                <t t-set="loc_val" t-value="0.0"/>
+
+                                <!-- ===== Category loop ===== -->
+                                <t t-foreach="cat_map.items()" t-as="cat_item">
+                                    <t t-set="cat_name" t-value="cat_item[0]"/>
+                                    <t t-set="products" t-value="cat_item[1]"/>
+
+                                    <tr style="background:#f6f6f6; font-weight:bold;">
+                                        <td t-att-colspan="col_count">Category: <t t-esc="cat_name"/></td>
+                                    </tr>
+
+                                    <t t-set="cat_qty" t-value="0.0"/>
+                                    <t t-set="cat_val" t-value="0.0"/>
+
+                                    <!-- ===== Product lines ===== -->
+                                    <t t-foreach="products" t-as="p">
+                                        <t t-if="not summary_only">
+                                            <tr>
+                                                <td><t t-esc="p.get('product_name')"/></td>
+                                                <td class="text-end"><t t-esc="'%.2f' % (p.get('qty', 0.0) or 0.0)"/></td>
+                                                <td><t t-esc="p.get('uom')"/></td>
+                                                <td class="text-end"><t t-esc="'%.2f' % (p.get('unit_cost', 0.0) or 0.0)"/></td>
+                                                <td class="text-end"><t t-esc="'%.2f' % (p.get('value', 0.0) or 0.0)"/></td>
+                                                <t t-if="show_movements">
+                                                    <td class="text-end"><t t-esc="'%.2f' % (p.get('vendor_in', 0.0) or 0.0)"/></td>
+                                                    <td class="text-end"><t t-esc="'%.2f' % (p.get('customer_out', 0.0) or 0.0)"/></td>
+                                                    <td class="text-end"><t t-esc="'%.2f' % (p.get('internal_move', 0.0) or 0.0)"/></td>
+                                                </t>
+                                            </tr>
+                                        </t>
+                                        <t t-set="cat_qty" t-value="cat_qty + (p.get('qty', 0.0) or 0.0)"/>
+                                        <t t-set="cat_val" t-value="cat_val + (p.get('value', 0.0) or 0.0)"/>
+                                    </t>
+
+                                    <!-- Category subtotal -->
+                                    <tr style="font-weight:bold;">
+                                        <td>Category Subtotal</td>
+                                        <td class="text-end"><t t-esc="'%.2f' % (cat_qty or 0.0)"/></td>
+                                        <td></td>
+                                        <td></td>
+                                        <td class="text-end"><t t-esc="'%.2f' % (cat_val or 0.0)"/></td>
+                                        <t t-if="show_movements">
+                                            <td colspan="3"></td>
+                                        </t>
+                                    </tr>
+
+                                    <t t-set="loc_qty" t-value="loc_qty + cat_qty"/>
+                                    <t t-set="loc_val" t-value="loc_val + cat_val"/>
+                                </t>
+
+                                <!-- Location subtotal -->
+                                <tr style="font-weight:bold; background:#f0f0f0;">
+                                    <td>Location Subtotal</td>
+                                    <td class="text-end"><t t-esc="'%.2f' % (loc_qty or 0.0)"/></td>
+                                    <td></td>
+                                    <td></td>
+                                    <td class="text-end"><t t-esc="'%.2f' % (loc_val or 0.0)"/></td>
+                                    <t t-if="show_movements">
+                                        <td colspan="3"></td>
+                                    </t>
+                                </tr>
+
+                                <t t-set="grand_qty" t-value="grand_qty + loc_qty"/>
+                                <t t-set="grand_val" t-value="grand_val + loc_val"/>
+
+                            </t>
+
+                            <!-- Grand total -->
+                            <tr style="font-weight:bold; background:#d9d9d9;">
+                                <td>Grand Total</td>
+                                <td class="text-end"><t t-esc="'%.2f' % (grand_qty or 0.0)"/></td>
+                                <td></td>
+                                <td></td>
+                                <td class="text-end"><t t-esc="'%.2f' % (grand_val or 0.0)"/></td>
+                                <t t-if="show_movements">
+                                    <td colspan="3"></td>
+                                </t>
+                            </tr>
+
+                        </tbody>
+                    </table>
+
+                    <p class="text-muted" style="margin-top:10px;">
+                        Note: FIFO unit cost is derived from Stock Valuation Layers (remaining value/qty) at product level, then applied to on-hand quantities per location.
+                    </p>
+
+                </div>
+            </t>
+        </t>
+    </template>
+
+</odoo>

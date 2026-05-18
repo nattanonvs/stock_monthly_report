@@ -1,0 +1,4 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_stock_monthly_settings_user,access.stock.monthly.settings,model_stock_monthly_settings,base.group_user,1,1,1,0
+access_stock_monthly_wizard_user,access.stock.monthly.wizard,model_stock_monthly_wizard,base.group_user,1,1,1,1
+access_stock_fifo_asof_wizard_user,access.stock.fifo.asof.wizard,model_stock_fifo_asof_wizard,base.group_user,1,1,1,1

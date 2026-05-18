@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- XLSX Report Action -->
+    <record id="action_stock_monthly_report_xlsx" model="ir.actions.report">
+        <field name="name">Stock Monthly Report (XLSX)</field>
+        <!-- ต้องตรงกับ recordset ที่คุณส่งเข้า render: quants.ids -->
+        <field name="model">stock.quant</field>
+        <field name="report_type">xlsx</field>
+        <!-- ต้องตรงกับ _name หลังคำว่า report. -->
+        <field name="report_name">stock_monthly_report.report_stock_monthly_xlsx</field>
+        <field name="report_file">stock_monthly_report.report_stock_monthly_xlsx</field>
+        <field name="binding_type">report</field>
+    </record>
+
+    <!-- PDF Report Action (ตัวอย่าง placeholder)
+         คุณต้องมี QWeb template ด้วย (report_name ให้ตรงกับ template จริง)
+    -->
+    <record id="action_stock_monthly_report_pdf" model="ir.actions.report">
+        <field name="name">Stock Monthly Report (PDF)</field>
+        <field name="model">stock.quant</field>
+        <field name="report_type">qweb-pdf</field>
+        <field name="report_name">stock_monthly_report.report_stock_monthly_pdf</field>
+        <field name="report_file">stock_monthly_report.report_stock_monthly_pdf</field>
+        <field name="binding_type">report</field>
+    </record>
+
+</odoo>

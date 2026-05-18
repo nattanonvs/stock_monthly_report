@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+  <record id="action_stock_fifo_asof_xlsx" model="ir.actions.report">
+    <field name="name">FIFO Valuation As-of (XLSX)</field>
+    <field name="model">stock.fifo.asof.wizard</field>
+    <field name="report_type">xlsx</field>
+    <field name="report_name">stock_monthly_report.report_stock_fifo_asof_xlsx</field>
+    <field name="report_file">stock_monthly_report.report_stock_fifo_asof_xlsx</field>
+    <field name="binding_type">report</field>
+  </record>
+</odoo>

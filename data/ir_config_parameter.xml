@@ -1,0 +1,21 @@
+<odoo>
+<record id="param_stock_monthly_recipients" model="ir.config_parameter">
+    <field name="key">stock_monthly_report.recipients</field>
+    <field name="value">team@yourcompany.com</field>
+</record>
+
+    <record id="param_stock_monthly_valuation" model="ir.config_parameter">
+        <field name="key">stock_monthly_report.valuation_policy</field>
+        <field name="value">fifo</field>
+    </record>
+
+    <record id="param_stock_monthly_months_back" model="ir.config_parameter">
+        <field name="key">stock_monthly_report.months_back</field>
+        <field name="value">1</field>
+    </record>
+
+    <record id="param_stock_monthly_timezone" model="ir.config_parameter">
+        <field name="key">stock_monthly_report.timezone</field>
+        <field name="value">Asia/Bangkok</field>
+    </record>
+</odoo>

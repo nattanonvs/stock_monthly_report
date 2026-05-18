@@ -1,0 +1,38 @@
+<odoo>
+    <record id="action_stock_monthly_wizard" model="ir.actions.act_window">
+        <field name="name">Monthly Stock Report Wizard</field>
+        <field name="res_model">stock.monthly.wizard</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+    </record>
+
+    <menuitem
+        id="menu_stock_monthly_report_root"
+        name="Monthly Stock Report"
+        parent="stock.menu_stock_root"
+    />
+
+    <menuitem
+        id="menu_stock_monthly_wizard"
+        name="Generate Report"
+        parent="menu_stock_monthly_report_root"
+        action="action_stock_monthly_wizard"
+        sequence="10"
+    />
+
+    <menuitem
+        id="menu_stock_monthly_settings"
+        name="Settings"
+        parent="menu_stock_monthly_report_root"
+        action="action_stock_monthly_settings"
+        sequence="20"
+    />
+
+    <menuitem
+        id="menu_stock_fifo_asof"
+        name="FIFO Valuation (As-of Date)"
+        parent="menu_stock_monthly_report_root"
+        action="action_stock_fifo_asof_wizard"
+        sequence="30"
+    />
+</odoo>

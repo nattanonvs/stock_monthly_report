@@ -1,0 +1,31 @@
+<odoo>
+    <record id="view_stock_monthly_settings" model="ir.ui.view">
+        <field name="name">stock.monthly.settings.form</field>
+        <field name="model">stock.monthly.settings</field>
+        <field name="type">form</field>
+        <field name="arch" type="xml">
+            <form string="Monthly Stock Settings">
+                <group string="Recipients &amp; Policy">
+                    <field name="recipients"/>
+                    <field name="valuation_policy"/>
+                </group>
+                <group string="Report Options">
+                    <field name="months_back"/>
+                    <field name="timezone"/>
+                </group>
+                <footer>
+                    <button string="Save" type="object" name="set_values" class="btn-primary"/>
+                    <button string="Cancel" class="btn-secondary" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_stock_monthly_settings" model="ir.actions.act_window">
+        <field name="name">Monthly Stock Settings</field>
+        <field name="res_model">stock.monthly.settings</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+        <field name="view_id" ref="view_stock_monthly_settings"/>
+    </record>
+</odoo>

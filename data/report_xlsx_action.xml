@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- XLSX Report Action -->
+    <record id="action_stock_monthly_report_xlsx" model="ir.actions.report">
+        <field name="name">Stock Monthly Report (XLSX)</field>
+
+        <!-- ต้องตรงกับ recordset ที่คุณส่งเข้าไป render (เช่น stock.quant ids) -->
+        <field name="model">stock.quant</field>
+
+        <field name="report_type">xlsx</field>
+
+        <!-- ต้องตรงกับ Python: _name = "report.stock_monthly_report.report_stock_monthly_xlsx" -->
+        <field name="report_name">stock_monthly_report.report_stock_monthly_xlsx</field>
+
+        <!-- ใส่ไว้ก็ได้เพื่อความครบ (บางชุด addon ใช้ field นี้) -->
+        <field name="report_file">stock_monthly_report.report_stock_monthly_xlsx</field>
+
+        <field name="binding_type">report</field>
+    </record>
+
+</odoo>
