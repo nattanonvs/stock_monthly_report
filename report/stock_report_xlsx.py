@@ -25,7 +25,10 @@ class StockReportXlsx(models.AbstractModel):
         summary_only = bool(getattr(wizard, "summary_only", False))
 
         # ---------- Period ----------
-        year = wizard.year
+        try:
+            year = int(wizard.year)
+        except Exception:
+            raise UserError(_("Invalid Year. Please enter a 4-digit year (e.g. 2026)."))
         m_start = int(wizard.month_start)
         m_end = int(wizard.month_end)
         last_day = calendar.monthrange(year, m_end)[1]
@@ -33,14 +36,11 @@ class StockReportXlsx(models.AbstractModel):
         date_to = fields.Datetime.to_datetime(f"{year}-{m_end:02d}-{last_day:02d} 23:59:59")
 
         # ---------- Location subtree ----------
-        if getattr(wizard, "include_sub_locations", True):
-            location_ids = self.env["stock.location"].search([("id", "child_of", wizard.location_id.id)]).ids
-        else:
-            location_ids = [wizard.location_id.id]
+        location_ids = wizard._get_location_ids()
 
         # ---------- Product / Category filters ----------
         product_ids = wizard.product_ids.ids
-        categ_id = wizard.categ_id.id if wizard.categ_id else False
+        categ_ids = wizard.categ_ids.ids
 
         # ---------- Formats ----------
         title_fmt = workbook.add_format({"bold": True, "font_size": 14})
@@ -54,58 +54,108 @@ class StockReportXlsx(models.AbstractModel):
         # ---------- Sheet ----------
         sheet = workbook.add_worksheet("Stock On Hand")
         sheet.set_column("A:A", 30)  # Product
-        sheet.set_column("B:B", 12)  # Qty
-        sheet.set_column("C:C", 10)  # UoM
-        sheet.set_column("D:D", 14)  # FIFO cost
-        sheet.set_column("E:E", 14)  # Value
+        sheet.set_column("B:B", 16)  # Internal Ref
+        sheet.set_column("C:C", 12)  # Qty
+        sheet.set_column("D:D", 10)  # UoM
+        sheet.set_column("E:E", 14)  # Unit cost
+        sheet.set_column("F:F", 14)  # Value
         if show_movements:
-            sheet.set_column("F:H", 14)
+            sheet.set_column("G:I", 14)
 
         # ---------- Header text ----------
-        sheet.write(0, 0, "Stock On Hand Report", title_fmt)
-        sheet.write(1, 0, f"Period: {year}-{m_start:02d} to {year}-{m_end:02d}")
-        sheet.write(2, 0, f"Location (incl. sub): {wizard.location_id.complete_name}")
-        if wizard.categ_id:
-            sheet.write(3, 0, f"Category: {wizard.categ_id.complete_name}")
+        def _fmt_user(dt):
+            if not dt:
+                return ""
+            local_dt = fields.Datetime.context_timestamp(wizard, dt)
+            return fields.Datetime.to_string(local_dt)
+
+        header_row = 0
+        sheet.write(header_row, 0, "Stock On Hand Report", title_fmt)
+        header_row += 1
+        sheet.write(header_row, 0, f"Period: {year}-{m_start:02d} to {year}-{m_end:02d}")
+        header_row += 1
+        sheet.write(header_row, 0, "Location (incl. sub): " + ", ".join(wizard.location_ids.mapped("complete_name")))
+        header_row += 1
+        if wizard.categ_ids:
+            sheet.write(header_row, 0, "Category: " + ", ".join(wizard.categ_ids.mapped("complete_name")))
+            header_row += 1
         if wizard.product_ids:
-            sheet.write(4, 0, "Products: " + ", ".join(wizard.product_ids.mapped("display_name")))
-        sheet.write(5, 0, f"Mode: {'SUMMARY' if summary_only else 'DETAIL'} | Movements: {'ON' if show_movements else 'OFF'}")
+            sheet.write(header_row, 0, "Products: " + ", ".join(wizard.product_ids.mapped("display_name")))
+            header_row += 1
+        sheet.write(header_row, 0, f"Mode: {'SUMMARY' if summary_only else 'DETAIL'} | Movements: {'ON' if show_movements else 'OFF'}")
+        header_row += 1
+        sheet.write(header_row, 0, f"Stock Balance As-of: {_fmt_user(date_to)}")
+        header_row += 1
+        if show_movements:
+            sheet.write(header_row, 0, f"Movements Period: {_fmt_user(date_from)} to {_fmt_user(date_to)}")
+            header_row += 1
+        sheet.write(header_row, 0, f"Wizard Created: {_fmt_user(wizard.create_date)}")
+        header_row += 1
+        sheet.write(header_row, 0, f"Printed At: {_fmt_user(fields.Datetime.now())}")
 
         # =========================================================
-        # 1) Aggregate QUANTS by location/category/product (SQL)
+        # 1) Qty ณ วันสิ้นงวด (As-of) ด้วย stock_move_line
         # =========================================================
-        where = ["q.location_id = ANY(%s)"]
-        params = [location_ids]
-
-        if not getattr(wizard, "include_zero_qty", False):
-            where.append("q.quantity != 0")
-
+        where = []
+        params = []
         if product_ids:
-            where.append("q.product_id = ANY(%s)")
+            where.append("m.product_id = ANY(%s)")
             params.append(product_ids)
-        elif categ_id:
-            # category subtree by parent_path for speed
-            where.append("pt.categ_id IN (SELECT id FROM product_category WHERE parent_path LIKE (SELECT parent_path FROM product_category WHERE id=%s) || '%%')")
-            params.append(categ_id)
+        elif categ_ids:
+            allowed_categ_ids = self.env["product.category"].search([("id", "child_of", categ_ids)]).ids
+            where.append("pt.categ_id = ANY(%s)")
+            params.append(allowed_categ_ids)
+
+        having = ""
+        if not getattr(wizard, "include_zero_qty", False):
+            having = "HAVING SUM(m.qty) != 0"
 
         self.env.cr.execute(f"""
+            WITH moves AS (
+                SELECT
+                    sml.location_dest_id AS location_id,
+                    sml.product_id AS product_id,
+                    sml.qty_done AS qty
+                FROM stock_move_line sml
+                JOIN stock_location dst ON dst.id = sml.location_dest_id
+                WHERE sml.state = 'done'
+                  AND sml.date <= %s
+                  AND dst.usage = 'internal'
+                  AND sml.location_dest_id = ANY(%s)
+
+                UNION ALL
+
+                SELECT
+                    sml.location_id AS location_id,
+                    sml.product_id AS product_id,
+                    -sml.qty_done AS qty
+                FROM stock_move_line sml
+                JOIN stock_location src ON src.id = sml.location_id
+                WHERE sml.state = 'done'
+                  AND sml.date <= %s
+                  AND src.usage = 'internal'
+                  AND sml.location_id = ANY(%s)
+            )
             SELECT
+                m.location_id,
                 sl.complete_name AS location,
                 pc.complete_name AS category,
                 pt.name AS product,
-                q.product_id,
-                SUM(q.quantity) AS qty,
+                pt.default_code AS default_code,
+                m.product_id,
+                SUM(m.qty) AS qty,
                 uom.name AS uom
-            FROM stock_quant q
-            JOIN stock_location sl ON sl.id = q.location_id
-            JOIN product_product pp ON pp.id = q.product_id
+            FROM moves m
+            JOIN stock_location sl ON sl.id = m.location_id
+            JOIN product_product pp ON pp.id = m.product_id
             JOIN product_template pt ON pt.id = pp.product_tmpl_id
             JOIN product_category pc ON pc.id = pt.categ_id
             JOIN uom_uom uom ON uom.id = pt.uom_id
-            WHERE {" AND ".join(where)}
-            GROUP BY sl.complete_name, pc.complete_name, pt.name, q.product_id, uom.name
-            ORDER BY sl.complete_name, pc.complete_name, pt.name
-        """, params)
+            {"WHERE " + " AND ".join(where) if where else ""}
+            GROUP BY m.location_id, sl.complete_name, pc.complete_name, pt.name, pt.default_code, m.product_id, uom.name
+            {having}
+            ORDER BY sl.complete_name, pc.complete_name, pt.default_code, pt.name
+        """, [date_to, location_ids, date_to, location_ids] + params)
 
         rows = self.env.cr.dictfetchall()
         if not rows:
@@ -114,25 +164,7 @@ class StockReportXlsx(models.AbstractModel):
 
         prod_list = sorted({r["product_id"] for r in rows})
 
-        # =========================================================
-        # 2) FIFO unit cost (current) from stock_valuation_layer
-        #    unit_cost = sum(remaining_value)/sum(remaining_qty)
-        # =========================================================
-        self.env.cr.execute("""
-            SELECT product_id,
-                   COALESCE(SUM(remaining_qty), 0) AS rem_qty,
-                   COALESCE(SUM(remaining_value), 0) AS rem_val
-            FROM stock_valuation_layer
-            WHERE product_id = ANY(%s)
-            GROUP BY product_id
-        """, [prod_list])
-
-        svl = {r["product_id"]: r for r in self.env.cr.dictfetchall()}
-        fifo_cost = {}
-        for pid in prod_list:
-            rq = (svl.get(pid) or {}).get("rem_qty") or 0.0
-            rv = (svl.get(pid) or {}).get("rem_val") or 0.0
-            fifo_cost[pid] = (rv / rq) if rq else 0.0
+        fifo_cost_map = self.env["fifo.service"].compute_fifo_unit_cost_by_location(prod_list, date_to)
 
         # =========================================================
         # 3) Movements split (Vendor/Customer/Internal) - OPTIONAL
@@ -164,12 +196,13 @@ class StockReportXlsx(models.AbstractModel):
         for r in rows:
             pid = r["product_id"]
             qty = r["qty"] or 0.0
-            cost = fifo_cost.get(pid, 0.0)
+            cost = fifo_cost_map.get((r["location_id"], pid), 0.0)
             value = qty * cost
             mv = mov_map.get(pid) or {}
 
             grouped[r["location"]][r["category"]].append({
                 "product": r["product"],
+                "default_code": r.get("default_code") or "",
                 "qty": qty,
                 "uom": r["uom"],
                 "cost": cost,
@@ -182,11 +215,11 @@ class StockReportXlsx(models.AbstractModel):
         # =========================================================
         # 5) Dynamic columns (hide movements if not checked)
         # =========================================================
-        base_headers = ["Product", "Qty", "UoM", "FIFO Unit Cost", "Value"]
+        base_headers = ["Product", "Internal Ref", "Qty", "UoM", "FIFO Unit Cost (As-of)", "Value"]
         move_headers = ["Vendor In", "Customer Out", "Internal"]
         headers = base_headers + (move_headers if show_movements else [])
 
-        start_row = 7
+        start_row = header_row + 2
         for col, h in enumerate(headers):
             sheet.write(start_row, col, h, header_fmt)
         row = start_row + 1
@@ -219,15 +252,16 @@ class StockReportXlsx(models.AbstractModel):
                     # ---- DETAIL: write product rows ----
                     for p in products:
                         sheet.write(row, 0, p["product"], text_fmt)
-                        sheet.write_number(row, 1, p["qty"], qty_fmt)
-                        sheet.write(row, 2, p["uom"], text_fmt)
-                        sheet.write_number(row, 3, p["cost"], money_fmt)
-                        sheet.write_number(row, 4, p["value"], money_fmt)
+                        sheet.write(row, 1, p["default_code"], text_fmt)
+                        sheet.write_number(row, 2, p["qty"], qty_fmt)
+                        sheet.write(row, 3, p["uom"], text_fmt)
+                        sheet.write_number(row, 4, p["cost"], money_fmt)
+                        sheet.write_number(row, 5, p["value"], money_fmt)
 
                         if show_movements:
-                            sheet.write_number(row, 5, p["vendor_in"], qty_fmt)
-                            sheet.write_number(row, 6, p["customer_out"], qty_fmt)
-                            sheet.write_number(row, 7, p["internal"], qty_fmt)
+                            sheet.write_number(row, 6, p["vendor_in"], qty_fmt)
+                            sheet.write_number(row, 7, p["customer_out"], qty_fmt)
+                            sheet.write_number(row, 8, p["internal"], qty_fmt)
 
                         cat_qty += p["qty"]
                         cat_val += p["value"]
@@ -246,14 +280,15 @@ class StockReportXlsx(models.AbstractModel):
 
                 # ---- Category subtotal row ----
                 sheet.write(row, 0, "Category Subtotal", sub_fmt)
-                sheet.write_number(row, 1, cat_qty, sub_fmt)
-                sheet.write(row, 2, "", sub_fmt)
+                sheet.write(row, 1, "", sub_fmt)
+                sheet.write_number(row, 2, cat_qty, sub_fmt)
                 sheet.write(row, 3, "", sub_fmt)
-                sheet.write_number(row, 4, cat_val, sub_fmt)
+                sheet.write(row, 4, "", sub_fmt)
+                sheet.write_number(row, 5, cat_val, sub_fmt)
                 if show_movements:
-                    sheet.write_number(row, 5, cat_vin, sub_fmt)
-                    sheet.write_number(row, 6, cat_cout, sub_fmt)
-                    sheet.write_number(row, 7, cat_int, sub_fmt)
+                    sheet.write_number(row, 6, cat_vin, sub_fmt)
+                    sheet.write_number(row, 7, cat_cout, sub_fmt)
+                    sheet.write_number(row, 8, cat_int, sub_fmt)
                 row += 1
 
                 loc_qty += cat_qty
@@ -264,14 +299,15 @@ class StockReportXlsx(models.AbstractModel):
 
             # ---- Location subtotal row ----
             sheet.write(row, 0, "Location Subtotal", sub_fmt)
-            sheet.write_number(row, 1, loc_qty, sub_fmt)
-            sheet.write(row, 2, "", sub_fmt)
+            sheet.write(row, 1, "", sub_fmt)
+            sheet.write_number(row, 2, loc_qty, sub_fmt)
             sheet.write(row, 3, "", sub_fmt)
-            sheet.write_number(row, 4, loc_val, sub_fmt)
+            sheet.write(row, 4, "", sub_fmt)
+            sheet.write_number(row, 5, loc_val, sub_fmt)
             if show_movements:
-                sheet.write_number(row, 5, loc_vin, sub_fmt)
-                sheet.write_number(row, 6, loc_cout, sub_fmt)
-                sheet.write_number(row, 7, loc_int, sub_fmt)
+                sheet.write_number(row, 6, loc_vin, sub_fmt)
+                sheet.write_number(row, 7, loc_cout, sub_fmt)
+                sheet.write_number(row, 8, loc_int, sub_fmt)
             row += 2
 
             grand_qty += loc_qty
@@ -282,13 +318,14 @@ class StockReportXlsx(models.AbstractModel):
 
         # ---- Grand total ----
         sheet.write(row, 0, "Grand Total", title_fmt)
-        sheet.write_number(row, 1, grand_qty, sub_fmt)
-        sheet.write_number(row, 4, grand_val, sub_fmt)
+        sheet.write(row, 1, "", sub_fmt)
+        sheet.write_number(row, 2, grand_qty, sub_fmt)
+        sheet.write_number(row, 5, grand_val, sub_fmt)
         if show_movements:
-            sheet.write_number(row, 5, grand_vin, sub_fmt)
-            sheet.write_number(row, 6, grand_cout, sub_fmt)
-            sheet.write_number(row, 7, grand_int, sub_fmt)
+            sheet.write_number(row, 6, grand_vin, sub_fmt)
+            sheet.write_number(row, 7, grand_cout, sub_fmt)
+            sheet.write_number(row, 8, grand_int, sub_fmt)
 
         # Note
         row += 2
-        sheet.write(row, 0, "Note: FIFO unit cost here is derived from current Stock Valuation Layers (remaining value/qty).")
+        sheet.write(row, 0, "Note: FIFO unit cost is simulated per location as-of period end by replaying stock moves (in/out/internal transfer) and valuing inbound layers using Stock Valuation Layers.")

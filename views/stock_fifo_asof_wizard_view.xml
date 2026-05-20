@@ -7,13 +7,13 @@
       <form string="FIFO Valuation (As-of Date)">
         <group>
           <field name="asof_datetime"/>
-          <field name="location_id"/>
+          <field name="location_ids" widget="many2many_tags"/>
           <field name="include_sub_locations"/>
         </group>
 
         <group string="Filters">
-          <field name="categ_id"/>
-          <field name="product_ids" widget="many2many_tags" domain="[('categ_id','child_of',categ_id)]"/>
+          <field name="categ_ids" widget="many2many_tags"/>
+          <field name="product_ids" widget="many2many_tags" domain="[]"/>
           <field name="summary_only"/>
         </group>
 

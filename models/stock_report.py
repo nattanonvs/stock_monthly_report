@@ -34,10 +34,10 @@ class StockReport(models.Model):
         start_month = max(1, end_month - max(1, months_back) + 1)
 
         wizard = self.env["stock.monthly.wizard"].create({
-            "year": end_year,
+            "year": str(end_year),
             "month_start": str(start_month),
             "month_end": str(end_month),
-            "location_id": location.id,
+            "location_ids": [(6, 0, [location.id])],
             "include_sub_locations": True,
             "include_zero_qty": False,
             "show_movements": True,

@@ -20,13 +20,11 @@ class StockFifoAsofXlsx(models.AbstractModel):
             raise UserError(_("Wizard not found"))
 
         asof = wizard.asof_datetime
-        location_ids = self.env["stock.location"].search(
-            [("id", "child_of" if wizard.include_sub_locations else "=", wizard.location_id.id)]
-        ).ids if wizard.include_sub_locations else [wizard.location_id.id]
+        location_ids = wizard._get_location_ids()
 
         # ---- product filter ----
         product_ids = wizard.product_ids.ids
-        categ_id = wizard.categ_id.id if wizard.categ_id else False
+        categ_ids = wizard.categ_ids.ids
 
         # =========================
         # 1) Qty at date by product (internal subtree)
@@ -84,9 +82,8 @@ class StockFifoAsofXlsx(models.AbstractModel):
         self.env.cr.execute(qty_sql, final_params)
         qty_rows = self.env.cr.dictfetchall()
 
-        if categ_id:
-            # filter category subtree in python safely (เร็วพอเพราะ grouped แล้ว)
-            allowed_cats = set(self.env["product.category"].search([("id", "child_of", categ_id)]).ids)
+        if categ_ids:
+            allowed_cats = set(self.env["product.category"].search([("id", "child_of", categ_ids)]).ids)
             qty_rows = [r for r in qty_rows if r["categ_id"] in allowed_cats]
 
         if not qty_rows:
@@ -142,11 +139,17 @@ class StockFifoAsofXlsx(models.AbstractModel):
         sheet.set_column("D:D", 14)
         sheet.set_column("E:E", 14)
 
+        def _fmt_user(dt):
+            if not dt:
+                return ""
+            local_dt = fields.Datetime.context_timestamp(wizard, dt)
+            return fields.Datetime.to_string(local_dt)
+
         sheet.write(0, 0, "FIFO Valuation (As-of Date)", title_fmt)
-        sheet.write(1, 0, f"As of: {asof}")
-        sheet.write(2, 0, f"Location (incl. sub): {wizard.location_id.complete_name}")
-        if wizard.categ_id:
-            sheet.write(3, 0, f"Category: {wizard.categ_id.complete_name}")
+        sheet.write(1, 0, f"As of: {_fmt_user(asof)}")
+        sheet.write(2, 0, "Location (incl. sub): " + ", ".join(wizard.location_ids.mapped("complete_name")))
+        if wizard.categ_ids:
+            sheet.write(3, 0, "Category: " + ", ".join(wizard.categ_ids.mapped("complete_name")))
         if wizard.product_ids:
             sheet.write(4, 0, "Products: " + ", ".join(wizard.product_ids.mapped("display_name")))
         sheet.write(5, 0, f"Mode: {'SUMMARY' if wizard.summary_only else 'DETAIL'}")

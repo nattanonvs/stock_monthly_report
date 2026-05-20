@@ -18,9 +18,9 @@ class StockFifoAsofWizard(models.TransientModel):
         help="Inventory valuation as of this datetime (backdated)."
     )
 
-    location_id = fields.Many2one(
+    location_ids = fields.Many2many(
         "stock.location",
-        string="Location",
+        string="Locations",
         domain=[("usage", "=", "internal")],
         required=True
     )
@@ -29,7 +29,7 @@ class StockFifoAsofWizard(models.TransientModel):
         default=True
     )
 
-    categ_id = fields.Many2one("product.category", string="Product Category")
+    categ_ids = fields.Many2many("product.category", string="Product Categories")
     product_ids = fields.Many2many("product.product", string="Products")
 
     summary_only = fields.Boolean(
@@ -40,19 +40,28 @@ class StockFifoAsofWizard(models.TransientModel):
 
     include_excel = fields.Boolean(string="Include Excel", default=True)
 
-    @api.onchange("categ_id")
-    def _onchange_categ_id(self):
-        if self.categ_id and self.product_ids:
+    @api.onchange("categ_ids")
+    def _onchange_categ_ids(self):
+        domain = []
+        if self.categ_ids:
+            domain = [("categ_id", "child_of", self.categ_ids.ids)]
+
+        if self.categ_ids and self.product_ids:
             allowed_products = self.env["product.product"].search([
-                ("categ_id", "child_of", self.categ_id.id)
+                ("categ_id", "child_of", self.categ_ids.ids)
             ])
             self.product_ids = self.product_ids & allowed_products
+
+        return {"domain": {"product_ids": domain}}
 
     def _get_location_ids(self):
         self.ensure_one()
         if self.include_sub_locations:
-            return self.env["stock.location"].search([("id", "child_of", self.location_id.id)]).ids
-        return [self.location_id.id]
+            return self.env["stock.location"].search([
+                ("id", "child_of", self.location_ids.ids),
+                ("usage", "=", "internal"),
+            ]).ids
+        return self.location_ids.ids
 
     def action_generate_asof_xlsx(self):
         self.ensure_one()

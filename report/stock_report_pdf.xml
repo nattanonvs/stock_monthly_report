@@ -25,8 +25,11 @@
                     <div class="row mb-2">
                         <div class="col-6">
                             <div><strong>Period:</strong> <t t-esc="header.get('period')"/></div>
-                            <div><strong>From:</strong> <t t-esc="header.get('date_from')"/></div>
-                            <div><strong>To:</strong> <t t-esc="header.get('date_to')"/></div>
+                            <div><strong>Movements Period From:</strong> <t t-esc="header.get('date_from')"/></div>
+                            <div><strong>Movements Period To:</strong> <t t-esc="header.get('date_to')"/></div>
+                            <div><strong>Stock Balance As-of:</strong> <t t-esc="header.get('date_to')"/></div>
+                            <div><strong>Wizard Created:</strong> <t t-esc="header.get('wizard_create')"/></div>
+                            <div><strong>Printed At:</strong> <t t-esc="header.get('printed_at')"/></div>
                         </div>
                         <div class="col-6">
                             <div><strong>Location (incl. sub):</strong> <t t-esc="header.get('location')"/></div>
@@ -39,15 +42,16 @@
                         </div>
                     </div>
 
-                    <t t-set="col_count" t-value="5 + (3 if show_movements else 0)"/>
+                    <t t-set="col_count" t-value="6 + (3 if show_movements else 0)"/>
 
                     <table class="table table-sm o_main_table">
                         <thead>
                             <tr>
-                                <th style="width:28%;">Product</th>
+                                <th style="width:26%;">Product</th>
+                                <th style="width:12%;">Internal Ref</th>
                                 <th class="text-end" style="width:10%;">On Hand</th>
                                 <th style="width:8%;">UoM</th>
-                                <th class="text-end" style="width:12%;">FIFO Unit Cost</th>
+                                <th class="text-end" style="width:12%;">FIFO Unit Cost (As-of)</th>
                                 <th class="text-end" style="width:12%;">Value</th>
                                 <t t-if="show_movements">
                                     <th class="text-end" style="width:10%;">Vendor In</th>
@@ -90,6 +94,7 @@
                                         <t t-if="not summary_only">
                                             <tr>
                                                 <td><t t-esc="p.get('product_name')"/></td>
+                                                <td><t t-esc="p.get('default_code')"/></td>
                                                 <td class="text-end"><t t-esc="'%.2f' % (p.get('qty', 0.0) or 0.0)"/></td>
                                                 <td><t t-esc="p.get('uom')"/></td>
                                                 <td class="text-end"><t t-esc="'%.2f' % (p.get('unit_cost', 0.0) or 0.0)"/></td>
@@ -107,7 +112,7 @@
 
                                     <!-- Category subtotal -->
                                     <tr style="font-weight:bold;">
-                                        <td>Category Subtotal</td>
+                                        <td colspan="2">Category Subtotal</td>
                                         <td class="text-end"><t t-esc="'%.2f' % (cat_qty or 0.0)"/></td>
                                         <td></td>
                                         <td></td>
@@ -123,7 +128,7 @@
 
                                 <!-- Location subtotal -->
                                 <tr style="font-weight:bold; background:#f0f0f0;">
-                                    <td>Location Subtotal</td>
+                                    <td colspan="2">Location Subtotal</td>
                                     <td class="text-end"><t t-esc="'%.2f' % (loc_qty or 0.0)"/></td>
                                     <td></td>
                                     <td></td>
@@ -140,7 +145,7 @@
 
                             <!-- Grand total -->
                             <tr style="font-weight:bold; background:#d9d9d9;">
-                                <td>Grand Total</td>
+                                <td colspan="2">Grand Total</td>
                                 <td class="text-end"><t t-esc="'%.2f' % (grand_qty or 0.0)"/></td>
                                 <td></td>
                                 <td></td>
@@ -154,7 +159,7 @@
                     </table>
 
                     <p class="text-muted" style="margin-top:10px;">
-                        Note: FIFO unit cost is derived from Stock Valuation Layers (remaining value/qty) at product level, then applied to on-hand quantities per location.
+                        Note: FIFO unit cost is simulated per location as-of period end by replaying stock moves (in/out/internal transfer) and valuing inbound layers using Stock Valuation Layers.
                     </p>
 
                 </div>

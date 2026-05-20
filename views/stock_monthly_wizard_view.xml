@@ -8,7 +8,7 @@
             <form string="Monthly Stock Report">
                 <group>
                     <group>
-                        <field name="year" options="{'grouping': False}"/>
+                        <field name="year"/>
                         <field name="month_start"/>
                         <field name="month_end"/>
                     </group>
@@ -23,16 +23,15 @@
 
                 <group>
                     <group>
-                        <field name="location_id"/>
+                        <field name="location_ids" widget="many2many_tags"/>
                         <field name="include_sub_locations"/>
                         <field name="include_zero_qty"/>
                     </group>
 
                     <group>
-                        <field name="categ_id"/>
+                        <field name="categ_ids" widget="many2many_tags"/>
                         <field name="product_ids" widget="many2many_tags"
-                               domain="[('categ_id','child_of',categ_id)]"
-                               attrs="{'readonly':[('categ_id','!=',False)]}"/>
+                               domain="[]"/>
                         <div class="o_form_label">Tip: เลือก Products จะ override Category (ถ้าเลือก Products แล้วจะไม่ใช้ Category)</div>
                     </group>
                 </group>

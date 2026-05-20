@@ -6,7 +6,7 @@ import logging
 import zipfile
 
 from odoo import models, fields, api, _
-from odoo.exceptions import UserError
+from odoo.exceptions import UserError, ValidationError
 
 _logger = logging.getLogger(__name__)
 
@@ -31,10 +31,11 @@ class StockMonthlyWizard(models.TransientModel):
     _description = "Monthly Stock Report Wizard"
 
     # ===== Period =====
-    year = fields.Integer(
+    year = fields.Char(
         string="Year",
         required=True,
-        default=lambda self: fields.Date.today().year,
+        size=4,
+        default=lambda self: str(fields.Date.today().year),
     )
     month_start = fields.Selection(
         _MONTH_SELECTION,
@@ -50,9 +51,9 @@ class StockMonthlyWizard(models.TransientModel):
     )
 
     # ===== Filters =====
-    location_id = fields.Many2one(
+    location_ids = fields.Many2many(
         "stock.location",
-        string="Location",
+        string="Locations",
         domain=[("usage", "=", "internal")],
         required=True,
     )
@@ -62,10 +63,7 @@ class StockMonthlyWizard(models.TransientModel):
         help="If checked, include all child locations under the selected location.",
     )
 
-    categ_id = fields.Many2one(
-        "product.category",
-        string="Product Category",
-    )
+    categ_ids = fields.Many2many("product.category", string="Product Categories")
     product_ids = fields.Many2many(
         "product.product",
         string="Products",
@@ -107,14 +105,25 @@ class StockMonthlyWizard(models.TransientModel):
     # ------------------------------------------------------------
     # UX: ถ้าเลือก Category แล้ว Products ต้องอยู่ใน category subtree เท่านั้น
     # ------------------------------------------------------------
-    @api.onchange("categ_id")
-    def _onchange_categ_id(self):
-        if self.categ_id and self.product_ids:
+    @api.constrains("year")
+    def _check_year(self):
+        for wiz in self:
+            if not wiz.year or not wiz.year.isdigit() or len(wiz.year) != 4:
+                raise ValidationError(_("Year must be a 4-digit number."))
+
+    @api.onchange("categ_ids")
+    def _onchange_categ_ids(self):
+        domain = []
+        if self.categ_ids:
+            domain = [("categ_id", "child_of", self.categ_ids.ids)]
+
+        if self.categ_ids and self.product_ids:
             allowed_products = self.env["product.product"].search([
-                ("categ_id", "child_of", self.categ_id.id)
+                ("categ_id", "child_of", self.categ_ids.ids)
             ])
-            # ✅ ต้องเป็น & (intersection) ไม่ใช่ &amp;
             self.product_ids = self.product_ids & allowed_products
+
+        return {"domain": {"product_ids": domain}}
 
     # ------------------------------------------------------------
     # Validate
@@ -134,8 +143,11 @@ class StockMonthlyWizard(models.TransientModel):
     def _get_location_ids(self):
         self.ensure_one()
         if self.include_sub_locations:
-            return self.env["stock.location"].search([("id", "child_of", self.location_id.id)]).ids
-        return [self.location_id.id]
+            return self.env["stock.location"].search([
+                ("id", "child_of", self.location_ids.ids),
+                ("usage", "=", "internal"),
+            ]).ids
+        return self.location_ids.ids
 
     def _get_quants(self):
         """
@@ -153,14 +165,17 @@ class StockMonthlyWizard(models.TransientModel):
 
         if self.product_ids:
             domain.append(("product_id", "in", self.product_ids.ids))
-        elif self.categ_id:
-            domain.append(("product_id.categ_id", "child_of", self.categ_id.id))
+        elif self.categ_ids:
+            allowed_categ_ids = self.env["product.category"].search([
+                ("id", "child_of", self.categ_ids.ids)
+            ]).ids
+            domain.append(("product_id.categ_id", "in", allowed_categ_ids))
 
         return self.env["stock.quant"].search(domain)
 
     def _get_period_range(self):
         self.ensure_one()
-        year = self.year
+        year = int(self.year)
         m_start = int(self.month_start)
         m_end = int(self.month_end)
         date_from = fields.Datetime.to_datetime(f"{year}-{m_start:02d}-01 00:00:00")
@@ -174,28 +189,40 @@ class StockMonthlyWizard(models.TransientModel):
     def action_open_stock_quantity_history(self):
         self.ensure_one()
 
-        # อ่าน action มาตรฐานของ Odoo
-        action = self.env.ref("stock.view_stock_quantity_history").read()[0]
+        date_to = self._get_period_range()[1]
 
-        # ส่งค่า default / context เข้าไป
-        action["context"] = {
-            # วันที่/เวลา (Inventory at Date)
-            "inventory_datetime": self._get_period_range()[1],  # ใช้ date_to หรือ as-of ที่คุณต้องการ
-            # default location
-            "default_location_id": self.location_id.id,
-            # รวม sub-location (ถ้าเปิดใช้ Storage Locations)
-            "search_default_location_id": self.location_id.id,
+        tree_view_id = self.env.ref("stock.view_stock_product_tree").id
+        form_view_id = self.env.ref("stock.product_form_view_procurement_button").id
+
+        domain = [("type", "in", ["product", "consu"])]
+        if self.product_ids:
+            domain.append(("id", "in", self.product_ids.ids))
+        elif self.categ_ids:
+            domain.append(("product_tmpl_id.categ_id", "child_of", self.categ_ids.ids))
+
+        ctx = dict(self.env.context or {})
+        ctx.update({
+            "to_date": date_to,
+            "location": self.location_ids.ids,
+            "compute_child": bool(self.include_sub_locations),
+        })
+
+        return {
+            "type": "ir.actions.act_window",
+            "name": _("Inventory at Date"),
+            "res_model": "product.product",
+            "views": [(tree_view_id, "tree"), (form_view_id, "form")],
+            "view_mode": "tree,form",
+            "domain": domain,
+            "context": ctx,
         }
-
-        return action
 
     def action_generate_reports(self):
         self.ensure_one()
         self._validate_inputs()
 
         quants = self._get_quants()
-        if not quants:
-            raise UserError(_("No stock data found for selected criteria."))
+        quant_ids = quants.ids
 
         # data payload ให้ report อ่าน wizard ได้ (PDF/XLSX จะใช้ wizard_id + flags)
         report_data = {
@@ -220,7 +247,7 @@ class StockMonthlyWizard(models.TransientModel):
             if not pdf_action:
                 raise UserError(_("Missing PDF report action: stock_monthly_report.action_stock_monthly_report_pdf"))
 
-            pdf_content, _report_type = pdf_action._render_qweb_pdf(quants.ids, data=report_data)
+            pdf_content, _report_type = pdf_action._render_qweb_pdf(quant_ids, data=report_data)
             if not (pdf_content or b""):
                 raise UserError(_("PDF generation returned empty content."))
             if not pdf_content.startswith(b"%PDF"):
@@ -251,7 +278,7 @@ class StockMonthlyWizard(models.TransientModel):
             if not xlsx_action:
                 raise UserError(_("Missing XLSX report action: stock_monthly_report.action_stock_monthly_report_xlsx"))
 
-            xlsx_content, _report_type = xlsx_action._render_xlsx(quants.ids, data=report_data)
+            xlsx_content, _report_type = xlsx_action._render_xlsx(quant_ids, data=report_data)
             if not (xlsx_content or b""):
                 raise UserError(_("XLSX generation returned empty content."))
             if not xlsx_content.startswith(b"PK"):
