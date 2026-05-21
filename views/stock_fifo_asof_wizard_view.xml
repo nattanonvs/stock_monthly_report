@@ -12,7 +12,8 @@
         </group>
 
         <group string="Filters">
-          <field name="categ_ids" widget="many2many_tags"/>
+          <field name="include_categ_ids" widget="many2many_tags"/>
+          <field name="exclude_categ_ids" widget="many2many_tags"/>
           <field name="product_ids" widget="many2many_tags" domain="[]"/>
           <field name="summary_only"/>
         </group>

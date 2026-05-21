@@ -24,7 +24,7 @@ class StockFifoAsofXlsx(models.AbstractModel):
 
         # ---- product filter ----
         product_ids = wizard.product_ids.ids
-        categ_ids = wizard.categ_ids.ids
+        include_subtree_ids, exclude_subtree_ids = wizard._get_category_filter_sets()
 
         # =========================
         # 1) Qty at date by product (internal subtree)
@@ -82,9 +82,10 @@ class StockFifoAsofXlsx(models.AbstractModel):
         self.env.cr.execute(qty_sql, final_params)
         qty_rows = self.env.cr.dictfetchall()
 
-        if categ_ids:
-            allowed_cats = set(self.env["product.category"].search([("id", "child_of", categ_ids)]).ids)
-            qty_rows = [r for r in qty_rows if r["categ_id"] in allowed_cats]
+        if include_subtree_ids:
+            qty_rows = [r for r in qty_rows if r["categ_id"] in include_subtree_ids]
+        if exclude_subtree_ids:
+            qty_rows = [r for r in qty_rows if r["categ_id"] not in exclude_subtree_ids]
 
         if not qty_rows:
             raise UserError(_("No quantities found at the selected date for given filters."))
@@ -148,14 +149,16 @@ class StockFifoAsofXlsx(models.AbstractModel):
         sheet.write(0, 0, "FIFO Valuation (As-of Date)", title_fmt)
         sheet.write(1, 0, f"As of: {_fmt_user(asof)}")
         sheet.write(2, 0, "Location (incl. sub): " + ", ".join(wizard.location_ids.mapped("complete_name")))
-        if wizard.categ_ids:
-            sheet.write(3, 0, "Category: " + ", ".join(wizard.categ_ids.mapped("complete_name")))
+        if wizard.include_categ_ids:
+            sheet.write(3, 0, "Include Categories: " + ", ".join(wizard.include_categ_ids.mapped("complete_name")))
+        if wizard.exclude_categ_ids:
+            sheet.write(4, 0, "Exclude Categories: " + ", ".join(wizard.exclude_categ_ids.mapped("complete_name")))
         if wizard.product_ids:
-            sheet.write(4, 0, "Products: " + ", ".join(wizard.product_ids.mapped("display_name")))
-        sheet.write(5, 0, f"Mode: {'SUMMARY' if wizard.summary_only else 'DETAIL'}")
+            sheet.write(5, 0, "Products: " + ", ".join(wizard.product_ids.mapped("display_name")))
+        sheet.write(6, 0, f"Mode: {'SUMMARY' if wizard.summary_only else 'DETAIL'}")
 
         headers = ["Product", "UoM", "Qty", "Unit Value", "Value"]
-        row = 7
+        row = 8
         for col, h in enumerate(headers):
             sheet.write(row, col, h, head_fmt)
         row += 1

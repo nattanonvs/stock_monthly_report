@@ -33,8 +33,11 @@
                         </div>
                         <div class="col-6">
                             <div><strong>Location (incl. sub):</strong> <t t-esc="header.get('location')"/></div>
-                            <t t-if="header.get('category')">
-                                <div><strong>Category:</strong> <t t-esc="header.get('category')"/></div>
+                            <t t-if="header.get('include_categories')">
+                                <div><strong>Include Categories:</strong> <t t-esc="header.get('include_categories')"/></div>
+                            </t>
+                            <t t-if="header.get('exclude_categories')">
+                                <div><strong>Exclude Categories:</strong> <t t-esc="header.get('exclude_categories')"/></div>
                             </t>
                             <t t-if="header.get('products')">
                                 <div><strong>Products:</strong> <t t-esc="header.get('products')"/></div>

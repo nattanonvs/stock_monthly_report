@@ -11,8 +11,10 @@
                         <field name="year"/>
                         <field name="month_start"/>
                         <field name="month_end"/>
+                        <field name="asof_time" placeholder="HH:MM"/>
                     </group>
                     <group>
+                        <field name="include_pdf"/>
                         <field name="include_excel"/>
                         <field name="summary_only"/>
                         <field name="show_movements" attrs="{'invisible':[('summary_only','=',True)]}"/>
@@ -29,7 +31,8 @@
                     </group>
 
                     <group>
-                        <field name="categ_ids" widget="many2many_tags"/>
+                        <field name="include_categ_ids" widget="many2many_tags"/>
+                        <field name="exclude_categ_ids" widget="many2many_tags"/>
                         <field name="product_ids" widget="many2many_tags"
                                domain="[]"/>
                         <div class="o_form_label">Tip: เลือก Products จะ override Category (ถ้าเลือก Products แล้วจะไม่ใช้ Category)</div>

@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-import calendar
 from collections import defaultdict
 
 from odoo import api, models, fields, _
 from odoo.exceptions import UserError
+from odoo.tools.misc import format_date, format_datetime
 
 
 class ReportStockMonthlyPDF(models.AbstractModel):
@@ -29,18 +29,12 @@ class ReportStockMonthlyPDF(models.AbstractModel):
         summary_only = bool(getattr(wizard, "summary_only", False))
 
         # ===== Period (เดือนเริ่ม-สิ้นสุด) =====
-        try:
-            year = int(wizard.year)
-        except Exception:
-            raise UserError(_("Invalid Year. Please enter a 4-digit year (e.g. 2026)."))
         m_start = int(wizard.month_start)
         m_end = int(wizard.month_end)
         if m_end < m_start:
             raise UserError(_("End Month must be >= Start Month."))
 
-        date_from = fields.Datetime.to_datetime(f"{year}-{m_start:02d}-01 00:00:00")
-        last_day = calendar.monthrange(year, m_end)[1]
-        date_to = fields.Datetime.to_datetime(f"{year}-{m_end:02d}-{last_day:02d} 23:59:59")
+        date_from, date_to = wizard._get_period_range()
 
         # ===== Location subtree =====
         location_ids = wizard._get_location_ids()
@@ -49,7 +43,8 @@ class ReportStockMonthlyPDF(models.AbstractModel):
 
         # ===== Product/Category filters =====
         product_ids = wizard.product_ids.ids
-        categ_ids = wizard.categ_ids.ids
+        include_categ_ids = wizard.include_categ_ids.ids
+        exclude_categ_ids = wizard.exclude_categ_ids.ids
 
         # ===== 1) Qty ณ วันสิ้นงวด (As-of) ด้วย stock_move_line =====
         # ทำให้ผลลัพธ์คงที่ตาม period (ไม่ใช่ realtime จาก stock_quant)
@@ -59,12 +54,14 @@ class ReportStockMonthlyPDF(models.AbstractModel):
         if product_ids:
             where.append("m.product_id = ANY(%s)")
             params.append(product_ids)
-        elif categ_ids:
-            allowed_categ_ids = self.env["product.category"].search([("id", "child_of", categ_ids)]).ids
-            where.append(
-                "pt.categ_id = ANY(%s)"
-            )
-            params.append(allowed_categ_ids)
+        else:
+            include_subtree_ids, exclude_subtree_ids = wizard._get_category_filter_sets()
+            if include_subtree_ids:
+                where.append("pt.categ_id = ANY(%s)")
+                params.append(sorted(include_subtree_ids))
+            if exclude_subtree_ids:
+                where.append("NOT (pt.categ_id = ANY(%s))")
+                params.append(sorted(exclude_subtree_ids))
 
         having = ""
         if not getattr(wizard, "include_zero_qty", False):
@@ -180,15 +177,17 @@ class ReportStockMonthlyPDF(models.AbstractModel):
         def _fmt_user(dt):
             if not dt:
                 return ""
-            local_dt = fields.Datetime.context_timestamp(wizard, dt)
-            return fields.Datetime.to_string(local_dt)
+            return format_datetime(self.env, dt)
 
+        local_from = fields.Datetime.context_timestamp(wizard, date_from)
+        local_to = fields.Datetime.context_timestamp(wizard, date_to)
         header = {
-            "period": f"{year}-{m_start:02d} ถึง {year}-{m_end:02d}",
+            "period": f"{format_date(self.env, local_from.date())} - {format_date(self.env, local_to.date())}",
             "date_from": _fmt_user(date_from),
             "date_to": _fmt_user(date_to),
             "location": ", ".join(wizard.location_ids.mapped("complete_name")) if wizard.location_ids else "",
-            "category": ", ".join(wizard.categ_ids.mapped("complete_name")) if wizard.categ_ids else "",
+            "include_categories": ", ".join(wizard.include_categ_ids.mapped("complete_name")) if wizard.include_categ_ids else "",
+            "exclude_categories": ", ".join(wizard.exclude_categ_ids.mapped("complete_name")) if wizard.exclude_categ_ids else "",
             "products": ", ".join(wizard.product_ids.mapped("display_name")) if wizard.product_ids else "",
             "wizard_create": _fmt_user(wizard.create_date),
             "printed_at": _fmt_user(fields.Datetime.now()),

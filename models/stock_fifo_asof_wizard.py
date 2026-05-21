@@ -29,7 +29,20 @@ class StockFifoAsofWizard(models.TransientModel):
         default=True
     )
 
-    categ_ids = fields.Many2many("product.category", string="Product Categories")
+    include_categ_ids = fields.Many2many(
+        "product.category",
+        "stock_fifo_asof_wizard_include_categ_rel",
+        "wizard_id",
+        "categ_id",
+        string="Include Product Categories",
+    )
+    exclude_categ_ids = fields.Many2many(
+        "product.category",
+        "stock_fifo_asof_wizard_exclude_categ_rel",
+        "wizard_id",
+        "categ_id",
+        string="Exclude Product Categories",
+    )
     product_ids = fields.Many2many("product.product", string="Products")
 
     summary_only = fields.Boolean(
@@ -40,16 +53,36 @@ class StockFifoAsofWizard(models.TransientModel):
 
     include_excel = fields.Boolean(string="Include Excel", default=True)
 
-    @api.onchange("categ_ids")
-    def _onchange_categ_ids(self):
-        domain = []
-        if self.categ_ids:
-            domain = [("categ_id", "child_of", self.categ_ids.ids)]
+    def _get_category_filter_sets(self):
+        self.ensure_one()
+        include_subtree_ids = set()
+        if self.include_categ_ids:
+            include_subtree_ids = set(self.env["product.category"].search([
+                ("id", "child_of", self.include_categ_ids.ids)
+            ]).ids)
 
-        if self.categ_ids and self.product_ids:
-            allowed_products = self.env["product.product"].search([
-                ("categ_id", "child_of", self.categ_ids.ids)
-            ])
+        exclude_subtree_ids = set()
+        if self.exclude_categ_ids:
+            exclude_subtree_ids = set(self.env["product.category"].search([
+                ("id", "child_of", self.exclude_categ_ids.ids)
+            ]).ids)
+
+        if include_subtree_ids:
+            include_subtree_ids -= exclude_subtree_ids
+
+        return include_subtree_ids, exclude_subtree_ids
+
+    @api.onchange("include_categ_ids", "exclude_categ_ids")
+    def _onchange_category_filters(self):
+        domain = []
+        include_subtree_ids, exclude_subtree_ids = self._get_category_filter_sets()
+        if include_subtree_ids:
+            domain.append(("categ_id", "in", list(include_subtree_ids)))
+        if exclude_subtree_ids:
+            domain.append(("categ_id", "not in", list(exclude_subtree_ids)))
+
+        if domain and self.product_ids:
+            allowed_products = self.env["product.product"].search(domain)
             self.product_ids = self.product_ids & allowed_products
 
         return {"domain": {"product_ids": domain}}

@@ -4,7 +4,9 @@ import calendar
 import io
 import logging
 import zipfile
+from datetime import datetime
 
+import pytz
 from odoo import models, fields, api, _
 from odoo.exceptions import UserError, ValidationError
 
@@ -49,6 +51,7 @@ class StockMonthlyWizard(models.TransientModel):
         required=True,
         default="1",
     )
+    asof_time = fields.Char(string="As-of Time (HH:MM)", help="Optional. If empty, uses current local time.")
 
     # ===== Filters =====
     location_ids = fields.Many2many(
@@ -63,7 +66,20 @@ class StockMonthlyWizard(models.TransientModel):
         help="If checked, include all child locations under the selected location.",
     )
 
-    categ_ids = fields.Many2many("product.category", string="Product Categories")
+    include_categ_ids = fields.Many2many(
+        "product.category",
+        "stock_monthly_wizard_include_categ_rel",
+        "wizard_id",
+        "categ_id",
+        string="Include Product Categories",
+    )
+    exclude_categ_ids = fields.Many2many(
+        "product.category",
+        "stock_monthly_wizard_exclude_categ_rel",
+        "wizard_id",
+        "categ_id",
+        string="Exclude Product Categories",
+    )
     product_ids = fields.Many2many(
         "product.product",
         string="Products",
@@ -111,16 +127,36 @@ class StockMonthlyWizard(models.TransientModel):
             if not wiz.year or not wiz.year.isdigit() or len(wiz.year) != 4:
                 raise ValidationError(_("Year must be a 4-digit number."))
 
-    @api.onchange("categ_ids")
-    def _onchange_categ_ids(self):
-        domain = []
-        if self.categ_ids:
-            domain = [("categ_id", "child_of", self.categ_ids.ids)]
+    def _get_category_filter_sets(self):
+        self.ensure_one()
+        include_subtree_ids = set()
+        if self.include_categ_ids:
+            include_subtree_ids = set(self.env["product.category"].search([
+                ("id", "child_of", self.include_categ_ids.ids)
+            ]).ids)
 
-        if self.categ_ids and self.product_ids:
-            allowed_products = self.env["product.product"].search([
-                ("categ_id", "child_of", self.categ_ids.ids)
-            ])
+        exclude_subtree_ids = set()
+        if self.exclude_categ_ids:
+            exclude_subtree_ids = set(self.env["product.category"].search([
+                ("id", "child_of", self.exclude_categ_ids.ids)
+            ]).ids)
+
+        if include_subtree_ids:
+            include_subtree_ids -= exclude_subtree_ids
+
+        return include_subtree_ids, exclude_subtree_ids
+
+    @api.onchange("include_categ_ids", "exclude_categ_ids")
+    def _onchange_category_filters(self):
+        domain = []
+        include_subtree_ids, exclude_subtree_ids = self._get_category_filter_sets()
+        if include_subtree_ids:
+            domain.append(("categ_id", "in", list(include_subtree_ids)))
+        if exclude_subtree_ids:
+            domain.append(("categ_id", "not in", list(exclude_subtree_ids)))
+
+        if domain and self.product_ids:
+            allowed_products = self.env["product.product"].search(domain)
             self.product_ids = self.product_ids & allowed_products
 
         return {"domain": {"product_ids": domain}}
@@ -136,6 +172,25 @@ class StockMonthlyWizard(models.TransientModel):
             raise UserError(_("End Month must be greater than or equal to Start Month."))
         if not (self.include_pdf or self.include_excel):
             raise UserError(_("Please select at least one output: PDF or Excel."))
+        self._parse_asof_time()
+
+    def _parse_asof_time(self):
+        self.ensure_one()
+        s = (self.asof_time or "").strip()
+        if not s:
+            return None
+        parts = s.split(":")
+        if len(parts) not in (2, 3):
+            raise ValidationError(_("As-of Time must be in HH:MM or HH:MM:SS format."))
+        try:
+            hh = int(parts[0])
+            mm = int(parts[1])
+            ss = int(parts[2]) if len(parts) == 3 else 0
+        except Exception:
+            raise ValidationError(_("As-of Time must be in HH:MM or HH:MM:SS format."))
+        if not (0 <= hh <= 23 and 0 <= mm <= 59 and 0 <= ss <= 59):
+            raise ValidationError(_("As-of Time must be a valid time (00:00 to 23:59)."))
+        return hh, mm, ss
 
     # ------------------------------------------------------------
     # Helpers
@@ -165,11 +220,12 @@ class StockMonthlyWizard(models.TransientModel):
 
         if self.product_ids:
             domain.append(("product_id", "in", self.product_ids.ids))
-        elif self.categ_ids:
-            allowed_categ_ids = self.env["product.category"].search([
-                ("id", "child_of", self.categ_ids.ids)
-            ]).ids
-            domain.append(("product_id.categ_id", "in", allowed_categ_ids))
+        else:
+            include_subtree_ids, exclude_subtree_ids = self._get_category_filter_sets()
+            if include_subtree_ids:
+                domain.append(("product_id.categ_id", "in", list(include_subtree_ids)))
+            if exclude_subtree_ids:
+                domain.append(("product_id.categ_id", "not in", list(exclude_subtree_ids)))
 
         return self.env["stock.quant"].search(domain)
 
@@ -178,9 +234,20 @@ class StockMonthlyWizard(models.TransientModel):
         year = int(self.year)
         m_start = int(self.month_start)
         m_end = int(self.month_end)
-        date_from = fields.Datetime.to_datetime(f"{year}-{m_start:02d}-01 00:00:00")
         last_day = calendar.monthrange(year, m_end)[1]
-        date_to = fields.Datetime.to_datetime(f"{year}-{m_end:02d}-{last_day:02d} 23:59:59")
+        tz = pytz.timezone(self.env.user.tz or "UTC")
+
+        time_parts = self._parse_asof_time()
+        if time_parts is None:
+            now_local = fields.Datetime.context_timestamp(self, fields.Datetime.now())
+            time_parts = (now_local.hour, now_local.minute, now_local.second)
+        hh, mm, ss = time_parts
+
+        date_from_local = tz.localize(datetime(year, m_start, 1, 0, 0, 0))
+        date_to_local = tz.localize(datetime(year, m_end, last_day, hh, mm, ss))
+
+        date_from = date_from_local.astimezone(pytz.UTC).replace(tzinfo=None)
+        date_to = date_to_local.astimezone(pytz.UTC).replace(tzinfo=None)
         return date_from, date_to
 
     # ------------------------------------------------------------
@@ -197,8 +264,12 @@ class StockMonthlyWizard(models.TransientModel):
         domain = [("type", "in", ["product", "consu"])]
         if self.product_ids:
             domain.append(("id", "in", self.product_ids.ids))
-        elif self.categ_ids:
-            domain.append(("product_tmpl_id.categ_id", "child_of", self.categ_ids.ids))
+        else:
+            include_subtree_ids, exclude_subtree_ids = self._get_category_filter_sets()
+            if include_subtree_ids:
+                domain.append(("product_tmpl_id.categ_id", "in", list(include_subtree_ids)))
+            if exclude_subtree_ids:
+                domain.append(("product_tmpl_id.categ_id", "not in", list(exclude_subtree_ids)))
 
         ctx = dict(self.env.context or {})
         ctx.update({

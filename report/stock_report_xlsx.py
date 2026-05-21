@@ -4,6 +4,7 @@ from collections import defaultdict
 
 from odoo import models, fields, _
 from odoo.exceptions import UserError
+from odoo.tools.misc import format_date, format_datetime
 
 
 class StockReportXlsx(models.AbstractModel):
@@ -25,22 +26,15 @@ class StockReportXlsx(models.AbstractModel):
         summary_only = bool(getattr(wizard, "summary_only", False))
 
         # ---------- Period ----------
-        try:
-            year = int(wizard.year)
-        except Exception:
-            raise UserError(_("Invalid Year. Please enter a 4-digit year (e.g. 2026)."))
-        m_start = int(wizard.month_start)
-        m_end = int(wizard.month_end)
-        last_day = calendar.monthrange(year, m_end)[1]
-        date_from = fields.Datetime.to_datetime(f"{year}-{m_start:02d}-01 00:00:00")
-        date_to = fields.Datetime.to_datetime(f"{year}-{m_end:02d}-{last_day:02d} 23:59:59")
+        date_from, date_to = wizard._get_period_range()
 
         # ---------- Location subtree ----------
         location_ids = wizard._get_location_ids()
 
         # ---------- Product / Category filters ----------
         product_ids = wizard.product_ids.ids
-        categ_ids = wizard.categ_ids.ids
+        include_categ_ids = wizard.include_categ_ids.ids
+        exclude_categ_ids = wizard.exclude_categ_ids.ids
 
         # ---------- Formats ----------
         title_fmt = workbook.add_format({"bold": True, "font_size": 14})
@@ -66,18 +60,26 @@ class StockReportXlsx(models.AbstractModel):
         def _fmt_user(dt):
             if not dt:
                 return ""
-            local_dt = fields.Datetime.context_timestamp(wizard, dt)
-            return fields.Datetime.to_string(local_dt)
+            return format_datetime(self.env, dt)
 
         header_row = 0
         sheet.write(header_row, 0, "Stock On Hand Report", title_fmt)
         header_row += 1
-        sheet.write(header_row, 0, f"Period: {year}-{m_start:02d} to {year}-{m_end:02d}")
+        local_from = fields.Datetime.context_timestamp(wizard, date_from)
+        local_to = fields.Datetime.context_timestamp(wizard, date_to)
+        sheet.write(
+            header_row,
+            0,
+            f"Period: {format_date(self.env, local_from.date())} to {format_date(self.env, local_to.date())}",
+        )
         header_row += 1
         sheet.write(header_row, 0, "Location (incl. sub): " + ", ".join(wizard.location_ids.mapped("complete_name")))
         header_row += 1
-        if wizard.categ_ids:
-            sheet.write(header_row, 0, "Category: " + ", ".join(wizard.categ_ids.mapped("complete_name")))
+        if wizard.include_categ_ids:
+            sheet.write(header_row, 0, "Include Categories: " + ", ".join(wizard.include_categ_ids.mapped("complete_name")))
+            header_row += 1
+        if wizard.exclude_categ_ids:
+            sheet.write(header_row, 0, "Exclude Categories: " + ", ".join(wizard.exclude_categ_ids.mapped("complete_name")))
             header_row += 1
         if wizard.product_ids:
             sheet.write(header_row, 0, "Products: " + ", ".join(wizard.product_ids.mapped("display_name")))
@@ -101,10 +103,14 @@ class StockReportXlsx(models.AbstractModel):
         if product_ids:
             where.append("m.product_id = ANY(%s)")
             params.append(product_ids)
-        elif categ_ids:
-            allowed_categ_ids = self.env["product.category"].search([("id", "child_of", categ_ids)]).ids
-            where.append("pt.categ_id = ANY(%s)")
-            params.append(allowed_categ_ids)
+        else:
+            include_subtree_ids, exclude_subtree_ids = wizard._get_category_filter_sets()
+            if include_subtree_ids:
+                where.append("pt.categ_id = ANY(%s)")
+                params.append(sorted(include_subtree_ids))
+            if exclude_subtree_ids:
+                where.append("NOT (pt.categ_id = ANY(%s))")
+                params.append(sorted(exclude_subtree_ids))
 
         having = ""
         if not getattr(wizard, "include_zero_qty", False):
